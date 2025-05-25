@@ -4,6 +4,7 @@ from flask_migrate import Migrate
 import os
 from dotenv import load_dotenv
 
+
 db = SQLAlchemy()
 migrate = Migrate()
 
@@ -15,8 +16,7 @@ def create_app():
 
     db.init_app(app)
     migrate.init_app(app, db)
-
-    from .routes import main as main_blueprint
-    app.register_blueprint(main_blueprint)
+    from .models import User, Shop, Product
 
     return app
+
