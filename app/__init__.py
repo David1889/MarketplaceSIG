@@ -17,6 +17,7 @@ def create_app():
     db.init_app(app)
     migrate.init_app(app, db)
     from .models import User, Shop, Product
-
+    from app.routes import routes
+    app.register_blueprint(routes)
     return app
 
