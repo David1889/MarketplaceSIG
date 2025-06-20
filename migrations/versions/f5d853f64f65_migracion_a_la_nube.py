@@ -1,8 +1,8 @@
-"""Primer Migracion
+"""Migracion a la nube
 
-Revision ID: 3c562a00a556
+Revision ID: f5d853f64f65
 Revises: 
-Create Date: 2025-05-25 15:38:31.739736
+Create Date: 2025-06-20 17:06:04.227505
 
 """
 from alembic import op
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = '3c562a00a556'
+revision = 'f5d853f64f65'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -30,8 +30,7 @@ def upgrade():
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('email')
     )
-    with op.batch_alter_table('user', schema=None) as batch_op:
-        batch_op.create_index('idx_user_coordinate', ['coordinates'], unique=False, postgresql_using='gist')
+    
 
     op.create_table('shop',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -41,8 +40,7 @@ def upgrade():
     sa.ForeignKeyConstraint(['user_id'], ['user.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    with op.batch_alter_table('shop', schema=None) as batch_op:
-        batch_op.create_index('idx_shop_coordinate', ['coordinates'], unique=False, postgresql_using='gist')
+    
 
     op.create_table('product',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -53,7 +51,7 @@ def upgrade():
     sa.ForeignKeyConstraint(['shop_id'], ['shop.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    # ### end Alembic commands ###
+        # ### end Alembic commands ###
 
 
 def downgrade():

@@ -1,26 +1,63 @@
 from flask import Blueprint, request, jsonify
 from app import db
 from app.models import Shop, Product, User
-from geoalchemy2.functions import ST_DWithin
-from sqlalchemy import func
+from geoalchemy2.functions import ST_DWithin, ST_AsText, ST_GeographyFromText
+from sqlalchemy import func, select
 from geopy.geocoders import Nominatim
+from app.mailer import send_email
+from geopy.exc import GeocoderTimedOut, GeocoderServiceError
+from sqlalchemy.exc import IntegrityError
+import logging
 
 routes = Blueprint('routes', __name__)
 
 @routes.route('/register', methods=['POST'])
 def register():
-    data = request.get_json()
-    if User.query.filter_by(email=data.get('email')).first():
-        return jsonify({'error': 'Email ya registrado'}), 400
+    data = request.json
+    email = data.get('email')
+    password = data.get('password')
+    name = data.get('name')
+    user_type = data.get('type')  # 'client', 'owner', etc.
+
+    if not all([email, password, name, user_type]):
+        return jsonify({"error": "Faltan datos obligatorios"}), 400
+
     user = User(
-        name=data.get('name'),
-        email=data.get('email'),
-        password=data.get('password'),
-        type=data.get('type')
+        email=email,
+        password=password,
+        name=name,
+        type=user_type
     )
-    db.session.add(user)
-    db.session.commit()
-    return jsonify({'message': 'Usuario registrado', 'user_id': user.id})
+
+    if user_type == 'client':
+        address = data.get('address')
+        radius = data.get('radius', 5000)  
+        if not address:
+            return jsonify({"error": "El cliente debe incluir un campo 'address'"}), 400
+
+        geolocator = Nominatim(user_agent="marketplace_sig_app")
+        try:
+            location = geolocator.geocode(address, timeout=10)
+        except (GeocoderTimedOut, GeocoderServiceError) as e:
+            return jsonify({"error": "Error de geocodificación", "detalle": str(e)}), 503
+
+        if not location:
+            return jsonify({"error": "Dirección no encontrada"}), 400
+
+        user.coordinates = f'POINT({location.longitude} {location.latitude})'
+        user.radius = radius
+
+    try:
+        db.session.add(user)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "El correo ya está registrado"}), 400
+
+    return jsonify({
+        "message": "Usuario registrado correctamente",
+        "user_id": user.id
+    }), 201
 
 @routes.route('/login', methods=['POST'])
 def login():
@@ -30,7 +67,7 @@ def login():
         return jsonify({'error': 'Credenciales incorrectas'}), 401
     return jsonify({'message': 'Login exitoso', 'user_id': user.id, 'type': user.type})
 
-@routes.route('/me', methods=['GET'])
+@routes.route('/profile', methods=['GET'])
 def get_user():
     user_id = request.args.get('user_id')
     user = User.query.get(user_id)
@@ -45,6 +82,73 @@ def get_user():
         'radius': user.radius
     })
 
+@routes.route('/users', methods=['GET'])
+def list_users():
+    users = User.query.all()
+    result = []
+    for user in users:
+        result.append({
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "type": user.type,
+            "coordinates": str(user.coordinates) if user.coordinates else None,
+            "radius": user.radius
+        })
+    return jsonify(result)
+
+@routes.route('/users/<int:user_id>', methods=['PUT'])
+def update_user(user_id):
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'Usuario no encontrado'}), 404
+
+    data = request.get_json()
+
+    if 'name' in data:
+        user.name = data['name']
+    if 'email' in data:
+        user.email = data['email']
+    if 'password' in data:
+        user.password = data['password']
+    if 'radius' in data:
+        try:
+            user.radius = float(data['radius'])
+        except ValueError:
+            return jsonify({"error": "Radius debe ser un número"}), 400
+
+    if 'address' in data:
+        address = data['address']
+        geolocator = Nominatim(user_agent="marketplace_sig_app")
+        try:
+            location = geolocator.geocode(address, timeout=10)
+        except (GeocoderTimedOut, GeocoderServiceError) as e:
+            return jsonify({"error": "Error de geocodificación", "detalle": str(e)}), 503
+
+        if not location:
+            return jsonify({"error": "Dirección no encontrada"}), 400
+
+        user.coordinates = f'POINT({location.longitude} {location.latitude})'
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "El correo ya está registrado"}), 400
+
+    return jsonify({
+        "message": "Usuario actualizado correctamente",
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "type": user.type,
+            "coordinates": str(user.coordinates),
+            "radius": user.radius
+        }
+    })
+
+
 @routes.route('/shops', methods=['POST'])
 def create_shop():
     data = request.json
@@ -53,11 +157,15 @@ def create_shop():
         return jsonify({"error": "Se requiere una dirección"}), 400
 
     geolocator = Nominatim(user_agent="marketplace_sig_app")
-    location = geolocator.geocode(address)
+
+    try:
+        location = geolocator.geocode(address, timeout=10)
+    except (GeocoderTimedOut, GeocoderServiceError) as e:
+        return jsonify({"error": "Error en el servicio de geocodificación", "detalle": str(e)}), 503
+
     if not location:
         return jsonify({"error": "Dirección no encontrada"}), 400
 
-    # Crear objeto Shop con coordenadas en formato WKT POINT(long lat)
     point_wkt = f'POINT({location.longitude} {location.latitude})'
     shop = Shop(
         name=data['name'],
@@ -67,7 +175,7 @@ def create_shop():
     db.session.add(shop)
     db.session.commit()
 
-    response = {
+    return jsonify({
         "id": shop.id,
         "name": shop.name,
         "coordinates": {
@@ -75,8 +183,7 @@ def create_shop():
             "lng": location.longitude
         },
         "user_id": shop.user_id
-    }
-    return jsonify(response), 201
+    }), 201
 
 @routes.route('/shops', methods=['GET'])
 def list_shops():
@@ -212,3 +319,66 @@ def delete_product(product_id):
     db.session.delete(product)
     db.session.commit()
     return jsonify({'message': 'Producto eliminado'})
+
+@routes.route('/send_offers', methods=['GET'])
+def send_offers():
+    clients = User.query.filter(
+        User.type == 'client',
+        User.coordinates.isnot(None),
+        User.radius.isnot(None)
+    ).all()
+    print(clients)
+    sent_count = 0
+    clients_sent = []
+    print(clients_sent)
+    for client in clients:
+        try:
+            wkt = db.session.scalar(select(ST_AsText(client.coordinates)))
+            if not wkt:
+                logging.info(f"Cliente {client.id} sin coordenadas WKT")
+                continue
+            print(wkt)
+            long_lat = wkt.replace('POINT(', '').replace(')', '').split()
+            longitude, latitude = float(long_lat[0]), float(long_lat[1])
+            logging.info(f"Cliente {client.id} coord: {longitude}, {latitude} radio: {client.radius}")
+            print(longitude,latitude)
+            point = func.ST_GeographyFromText(f'SRID=4326;POINT({longitude} {latitude})')
+            print(point)
+            nearby_shops = Shop.query.filter(
+                ST_DWithin(Shop.coordinates, point, client.radius)
+            ).all()
+            print(nearby_shops)
+            print(f"Cliente {client.id} encontró {len(nearby_shops)} tiendas cercanas")
+
+            offers = []
+            for shop in nearby_shops:
+                discounted_products = Product.query.filter_by(shop_id=shop.id, has_discount=True).all()
+                print(f"Tienda {shop.id} tiene {len(discounted_products)} productos con descuento")
+                for product in discounted_products:
+                    offers.append(f"- {product.name} (${product.price}) en {shop.name}")
+            print(offers)
+
+            if offers:
+                print(client.email)
+                body = f"Hola {client.name},\n\n¡Estas son las ofertas cerca tuyo!\n\n" + "\n".join(offers)
+                send_email(to=client.email, subject="Ofertas cerca tuyo", body=body)
+                
+                sent_count += 1
+
+                clients_sent.append({
+                    "id": client.id,
+                    "name": client.name,
+                    "email": client.email,
+                    "coordinates": {"lat": latitude, "lng": longitude},
+                    "radius": client.radius,
+                    "offers": offers
+                })
+
+        except Exception as e:
+            logging.error(f"Error al enviar ofertas al cliente {client.id}: {e}")
+
+    logging.info(f"Total correos enviados: {sent_count}")
+    return jsonify({
+        "message": f"Correos enviados a {sent_count} clientes con ofertas.",
+        "clients": clients_sent
+    })
