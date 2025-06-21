@@ -25,7 +25,7 @@ def create_app():
     app.config['MAIL_USE_SSL'] = False
     app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
     app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
-    app.config['MAIL_DEFAULT_SENDER'] = 'daviddelgadodev8@gmail.com'
+    app.config['MAIL_DEFAULT_SENDER'] = 'GeoMarket'
     init_mail(app)
     db.init_app(app)
     migrate.init_app(app, db)
