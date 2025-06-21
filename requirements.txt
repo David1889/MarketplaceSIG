@@ -6,3 +6,4 @@ geopy
 python-dotenv
 geoalchemy2
 flask-mail
+flask_cors

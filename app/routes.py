@@ -212,7 +212,7 @@ def list_shops():
             'name': shop.name,
             'coordinates': str(shop.coordinates),
             'user_id': shop.user_id,
-            'status': 'approved'
+            'status': shop.state
         })
     return jsonify(result)
 
@@ -226,7 +226,7 @@ def get_shop(shop_id):
         'name': shop.name,
         'coordinates': str(shop.coordinates),
         'user_id': shop.user_id,
-        'status': 'approved'
+        'status': shop.state
 
     })
 
@@ -240,6 +240,10 @@ def update_shop(shop_id):
         shop.name = data['name']
     if 'lat' in data and 'lng' in data:
         shop.coordinates = f'POINT({data["lng"]} {data["lat"]})'
+    if 'state' in data:
+        if data['state'] not in ['pending', 'accepted', 'declined']:
+            return jsonify({'error': 'Estado inválido'}), 400
+        shop.state = data['state']
     db.session.commit()
     return jsonify({'message': 'Tienda actualizada'})
 
@@ -264,6 +268,7 @@ def create_product():
         name=data.get('name'),
         price=data.get('price'),
         has_discount=data.get('has_discount', False),
+        discount=data.get('discount'),
         shop_id=shop.id
     )
     db.session.add(product)
@@ -283,6 +288,7 @@ def list_products_by_shop(shop_id):
             'name': p.name,
             'price': p.price,
             'has_discount': p.has_discount,
+            'discount': p.discount,
             'shop_id': p.shop_id
         })
     return jsonify(result)
@@ -297,6 +303,7 @@ def get_product(product_id):
         'name': product.name,
         'price': product.price,
         'has_discount': product.has_discount,
+        'discount': product.discount,
         'shop_id': product.shop_id
     })
 
@@ -312,6 +319,8 @@ def update_product(product_id):
         product.price = data['price']
     if 'has_discount' in data:
         product.has_discount = data['has_discount']
+    if 'discount' in data:
+        product.discount = data['discount']
     db.session.commit()
     return jsonify({'message': 'Producto actualizado'})
 
@@ -349,7 +358,8 @@ def send_offers():
             point = func.ST_GeographyFromText(f'SRID=4326;POINT({longitude} {latitude})')
             print(point)
             nearby_shops = Shop.query.filter(
-                ST_DWithin(Shop.coordinates, point, client.radius)
+                ST_DWithin(Shop.coordinates, point, client.radius),
+                Shop.state == 'accepted'
             ).all()
             print(nearby_shops)
             print(f"Cliente {client.id} encontró {len(nearby_shops)} tiendas cercanas")

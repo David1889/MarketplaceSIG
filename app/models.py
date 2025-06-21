@@ -3,6 +3,7 @@ from geoalchemy2 import Geography
 from sqlalchemy.dialects.postgresql import ENUM
 
 user_type_enum = ENUM('client', 'owner','admin', name='user_type', create_type=False)
+shop_state_enum = ENUM('accepted', 'pending', 'declined', name='shop_state', create_type=False)
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -21,7 +22,7 @@ class Shop(db.Model):
     name = db.Column(db.String(100), nullable=False)
     coordinates = db.Column(Geography(geometry_type='POINT', srid=4326))
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-
+    state = db.Column(shop_state_enum, default='pending', nullable=False)
     products = db.relationship("Product", backref="shop", lazy=True)
 
 class Product(db.Model):
@@ -29,4 +30,5 @@ class Product(db.Model):
     name = db.Column(db.String(100), nullable=False)
     price = db.Column(db.Float, nullable=False)
     has_discount = db.Column(db.Boolean, default=False)
+    discount = db.Column(db.Float, default=0.0)
     shop_id = db.Column(db.Integer, db.ForeignKey('shop.id'), nullable=False)
