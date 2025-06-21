@@ -5,6 +5,8 @@ import os
 from dotenv import load_dotenv
 from app.mailer import init_mail
 from flask_mail import Mail
+from flask_cors import CORS
+
 
 
 db = SQLAlchemy()
@@ -13,6 +15,7 @@ migrate = Migrate()
 def create_app():
     load_dotenv()
     app = Flask(__name__)
+    CORS(app)
     app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 

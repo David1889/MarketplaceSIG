@@ -90,6 +90,7 @@ def list_users():
         result.append({
             "id": user.id,
             "name": user.name,
+            "password": user.password,  # No deberías enviar la contraseña en una respuesta
             "email": user.email,
             "type": user.type,
             "coordinates": str(user.coordinates) if user.coordinates else None,
@@ -210,7 +211,8 @@ def list_shops():
             'id': shop.id,
             'name': shop.name,
             'coordinates': str(shop.coordinates),
-            'user_id': shop.user_id
+            'user_id': shop.user_id,
+            'status': 'approved'
         })
     return jsonify(result)
 
@@ -223,7 +225,9 @@ def get_shop(shop_id):
         'id': shop.id,
         'name': shop.name,
         'coordinates': str(shop.coordinates),
-        'user_id': shop.user_id
+        'user_id': shop.user_id,
+        'status': 'approved'
+
     })
 
 @routes.route('/shops/<int:shop_id>', methods=['PUT'])
