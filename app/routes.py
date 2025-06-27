@@ -369,7 +369,7 @@ def send_offers():
                 discounted_products = Product.query.filter_by(shop_id=shop.id, has_discount=True).all()
                 print(f"Tienda {shop.id} tiene {len(discounted_products)} productos con descuento")
                 for product in discounted_products:
-                    offers.append(f"- {product.name} (${product.price}) en {shop.name}")
+                    offers.append(f"- {product.name} (${product.price*((100-product.discount)/100)}) en {shop.name}")
             print(offers)
 
             if offers:
