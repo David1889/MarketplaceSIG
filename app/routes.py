@@ -191,7 +191,7 @@ def list_shops():
     #argumentos de latitud y longitud EN REVISION, tengo que ver si hay algo más óptimo para geolocalizar..
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)
-    radius = request.args.get('radius', type=float)  #en metros.. 
+    radius = request.args.get('radius', type=float)  
 
     query = Shop.query
 
@@ -201,7 +201,7 @@ def list_shops():
             ST_DWithin(
                 Shop.coordinates,
                 func.ST_GeographyFromText(f'SRID=4326;{point_wkt}'),
-                radius
+                radius*1000
             )
         )
     shops = query.all()
@@ -358,7 +358,7 @@ def send_offers():
             point = func.ST_GeographyFromText(f'SRID=4326;POINT({longitude} {latitude})')
             print(point)
             nearby_shops = Shop.query.filter(
-                ST_DWithin(Shop.coordinates, point, client.radius),
+                ST_DWithin(Shop.coordinates, point, client.radius*1000),
                 Shop.state == 'accepted'
             ).all()
             print(nearby_shops)
