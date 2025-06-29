@@ -7,7 +7,7 @@ from geopy.geocoders import Nominatim
 from app.mailer import send_email
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 from sqlalchemy.exc import IntegrityError
-import logging
+from sqlalchemy.sql import text
 
 routes = Blueprint('routes', __name__)
 
@@ -17,7 +17,7 @@ def register():
     email = data.get('email')
     password = data.get('password')
     name = data.get('name')
-    user_type = data.get('type')  # 'client', 'owner', etc.
+    user_type = data.get('type')
 
     if not all([email, password, name, user_type]):
         return jsonify({"error": "Faltan datos obligatorios"}), 400
@@ -90,7 +90,7 @@ def list_users():
         result.append({
             "id": user.id,
             "name": user.name,
-            "password": user.password,  # No deberías enviar la contraseña en una respuesta
+            "password": user.password,
             "email": user.email,
             "type": user.type,
             "coordinates": str(user.coordinates) if user.coordinates else None,
@@ -188,7 +188,6 @@ def create_shop():
 
 @routes.route('/shops', methods=['GET'])
 def list_shops():
-    #argumentos de latitud y longitud EN REVISION, tengo que ver si hay algo más óptimo para geolocalizar..
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)
     radius = request.args.get('radius', type=float)  
@@ -335,64 +334,56 @@ def delete_product(product_id):
 
 @routes.route('/send_offers', methods=['GET'])
 def send_offers():
-    clients = User.query.filter(
-        User.type == 'client',
-        User.coordinates.isnot(None),
-        User.radius.isnot(None)
-    ).all()
-    print(clients)
+    query = text("""
+    SELECT 
+        u.id AS client_id,
+        u.name AS client_name,
+        u.email AS client_email,
+        ST_Y(u.coordinates::geometry) AS client_lat,
+        ST_X(u.coordinates::geometry) AS client_lng,
+        u.radius AS client_radius,
+        s.name AS shop_name,
+        p.name AS product_name,
+        ROUND((p.price * (1 - p.discount / 100.0))::numeric, 2) AS discounted_price
+    FROM "user" u
+    JOIN shop s 
+        ON ST_DWithin(s.coordinates, u.coordinates, u.radius * 1000)
+        AND s.state = 'accepted'
+    JOIN product p 
+        ON p.shop_id = s.id
+    WHERE 
+        u.type = 'client'
+        AND u.coordinates IS NOT NULL
+        AND u.radius IS NOT NULL
+        AND p.has_discount = TRUE
+""")
+    
+    results = db.session.execute(query).fetchall()
+
+    offers_by_client = {}
+    for row in results:
+        client_id = row.client_id
+        if client_id not in offers_by_client:
+            offers_by_client[client_id] = {
+                "id": client_id,
+                "name": row.client_name,
+                "email": row.client_email,
+                "coordinates": {"lat": row.client_lat, "lng": row.client_lng},
+                "radius": row.client_radius,
+                "offers": []
+            }
+        offers_by_client[client_id]["offers"].append(
+            f"- {row.product_name} (${row.discounted_price}) en {row.shop_name}"
+        )
+
     sent_count = 0
-    clients_sent = []
-    print(clients_sent)
-    for client in clients:
-        try:
-            wkt = db.session.scalar(select(ST_AsText(client.coordinates)))
-            if not wkt:
-                logging.info(f"Cliente {client.id} sin coordenadas WKT")
-                continue
-            print(wkt)
-            long_lat = wkt.replace('POINT(', '').replace(')', '').split()
-            longitude, latitude = float(long_lat[0]), float(long_lat[1])
-            logging.info(f"Cliente {client.id} coord: {longitude}, {latitude} radio: {client.radius}")
-            print(longitude,latitude)
-            point = func.ST_GeographyFromText(f'SRID=4326;POINT({longitude} {latitude})')
-            print(point)
-            nearby_shops = Shop.query.filter(
-                ST_DWithin(Shop.coordinates, point, client.radius*1000),
-                Shop.state == 'accepted'
-            ).all()
-            print(nearby_shops)
-            print(f"Cliente {client.id} encontró {len(nearby_shops)} tiendas cercanas")
+    for client in offers_by_client.values():
+        if client["offers"]:
+            body = f"Hola {client['name']},\n\n¡Estas son las ofertas cerca tuyo!\n\n" + "\n".join(client["offers"])
+            send_email(to=client["email"], subject="Ofertas cerca tuyo", body=body)
+            sent_count += 1
 
-            offers = []
-            for shop in nearby_shops:
-                discounted_products = Product.query.filter_by(shop_id=shop.id, has_discount=True).all()
-                print(f"Tienda {shop.id} tiene {len(discounted_products)} productos con descuento")
-                for product in discounted_products:
-                    offers.append(f"- {product.name} (${product.price*((100-product.discount)/100)}) en {shop.name}")
-            print(offers)
-
-            if offers:
-                print(client.email)
-                body = f"Hola {client.name},\n\n¡Estas son las ofertas cerca tuyo!\n\n" + "\n".join(offers)
-                send_email(to=client.email, subject="Ofertas cerca tuyo", body=body)
-                
-                sent_count += 1
-
-                clients_sent.append({
-                    "id": client.id,
-                    "name": client.name,
-                    "email": client.email,
-                    "coordinates": {"lat": latitude, "lng": longitude},
-                    "radius": client.radius,
-                    "offers": offers
-                })
-
-        except Exception as e:
-            logging.error(f"Error al enviar ofertas al cliente {client.id}: {e}")
-
-    logging.info(f"Total correos enviados: {sent_count}")
     return jsonify({
         "message": f"Correos enviados a {sent_count} clientes con ofertas.",
-        "clients": clients_sent
+        "clients": list(offers_by_client.values())
     })
