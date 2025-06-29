@@ -8,5 +8,6 @@ def init_mail(app):
 
 def send_email(to, subject, body):
     with current_app.app_context():
-        msg = Message(subject=subject, recipients=[to], body=body, sender='Geomarket <daviddelgadodev8@gmail.com>')
+        msg = Message(subject=subject, recipients=[to], html=body, sender='Geomarket <noreply@geomarket.com>')
         mail.send(msg)
+

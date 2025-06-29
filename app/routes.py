@@ -1,5 +1,6 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, render_template, request, jsonify
 from app import db
+from app.geo_utils import get_discounted_products_query
 from app.models import Shop, Product, User
 from geoalchemy2.functions import ST_DWithin, ST_AsText, ST_GeographyFromText
 from sqlalchemy import func, select
@@ -334,30 +335,7 @@ def delete_product(product_id):
 
 @routes.route('/send_offers', methods=['GET'])
 def send_offers():
-    query = text("""
-    SELECT 
-        u.id AS client_id,
-        u.name AS client_name,
-        u.email AS client_email,
-        ST_Y(u.coordinates::geometry) AS client_lat,
-        ST_X(u.coordinates::geometry) AS client_lng,
-        u.radius AS client_radius,
-        s.name AS shop_name,
-        p.name AS product_name,
-        ROUND((p.price * (1 - p.discount / 100.0))::numeric, 2) AS discounted_price
-    FROM "user" u
-    JOIN shop s 
-        ON ST_DWithin(s.coordinates, u.coordinates, u.radius * 1000)
-        AND s.state = 'accepted'
-    JOIN product p 
-        ON p.shop_id = s.id
-    WHERE 
-        u.type = 'client'
-        AND u.coordinates IS NOT NULL
-        AND u.radius IS NOT NULL
-        AND p.has_discount = TRUE
-""")
-    
+    query = get_discounted_products_query()
     results = db.session.execute(query).fetchall()
 
     offers_by_client = {}
@@ -372,15 +350,18 @@ def send_offers():
                 "radius": row.client_radius,
                 "offers": []
             }
-        offers_by_client[client_id]["offers"].append(
-            f"- {row.product_name} (${row.discounted_price}) en {row.shop_name}"
-        )
+        offers_by_client[client_id]["offers"].append({
+            "product_name": row.product_name,
+            "original_price": float(row.original_price),
+            "discounted_price": float(row.discounted_price),
+            "shop_name": row.shop_name
+        })
 
     sent_count = 0
     for client in offers_by_client.values():
         if client["offers"]:
-            body = f"Hola {client['name']},\n\n¡Estas son las ofertas cerca tuyo!\n\n" + "\n".join(client["offers"])
-            send_email(to=client["email"], subject="Ofertas cerca tuyo", body=body)
+            html_body = render_template("offers_email.html", client=client)
+            send_email(to=client["email"], subject="Ofertas cerca tuyo", body=html_body)
             sent_count += 1
 
     return jsonify({
